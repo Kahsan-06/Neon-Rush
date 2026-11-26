@@ -1,0 +1,325 @@
+
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NEON RUSH</title>
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;background:#070817;color:white;
+ font-family:Arial,sans-serif;text-align:center;
+ overflow:hidden
+}
+h1{
+ margin:12px 0;color:#00eaff;
+ letter-spacing:6px;
+ text-shadow:0 0 15px #00eaff
+}
+#info{
+ display:flex;justify-content:center;
+ gap:25px;margin:10px;font-size:15px
+}
+canvas{
+ display:block;margin:auto;
+ width:min(94vw,420px);
+ height:min(65vh,620px);
+ background:#0b1025;
+ border:2px solid #00eaff;
+ border-radius:14px;
+ box-shadow:0 0 25px #007bff55
+}
+button{
+ border:1px solid #00eaff;
+ background:#101b38;color:white;
+ padding:12px 22px;border-radius:10px;
+ font-size:15px;font-weight:bold;
+ margin:7px;cursor:pointer
+}
+button:active{background:#007caa}
+#controls{margin-top:8px}
+#overlay{
+ position:fixed;inset:0;background:#050817dd;
+ display:flex;align-items:center;justify-content:center;
+ z-index:5
+}
+.panel{
+ background:#111a35;padding:30px;
+ border:1px solid #00eaff;
+ border-radius:18px;width:85%;max-width:350px;
+ box-shadow:0 0 35px #008cff55
+}
+.panel h2{color:#00eaff;font-size:30px}
+#overlay p{line-height:1.7;color:#c9d6ff}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+
+<h1>NEON RUSH</h1>
+
+<div id="info">
+ <span>⭐ SCORE: <b id="score">0</b></span>
+ <span>🪙 COINS: <b id="coins">0</b></span>
+ <span>🏆 BEST: <b id="best">0</b></span>
+</div>
+
+<canvas id="game" width="420" height="620"></canvas>
+
+<div id="controls">
+ <button id="left">◀ KIRI</button>
+ <button id="pause">Ⅱ PAUSE</button>
+ <button id="right">KANAN ▶</button>
+</div>
+
+<div id="overlay">
+ <div class="panel">
+  <h2 id="title">NEON RUSH</h2>
+  <p id="message">
+   Hindari semua rintangan!<br>
+   Kumpulkan koin sebanyak mungkin.<br>
+   Seberapa jauh kamu bisa bertahan?
+  </p>
+  <button id="start">MULAI GAME</button>
+ </div>
+</div>
+
+<script>
+const canvas=document.getElementById("game");
+const ctx=canvas.getContext("2d");
+
+const scoreEl=document.getElementById("score");
+const coinsEl=document.getElementById("coins");
+const bestEl=document.getElementById("best");
+const overlay=document.getElementById("overlay");
+
+let player,obstacles,coins,score,totalCoins;
+let speed,frame,running,paused,gameOver;
+let left=false,right=false;
+let best=Number(localStorage.getItem("neonBest")||0);
+bestEl.textContent=best;
+
+function reset(){
+ player={x:190,y:525,w:40,h:48};
+ obstacles=[];coins=[];
+ score=0;totalCoins=0;
+ speed=3;frame=0;
+ running=true;paused=false;gameOver=false;
+ scoreEl.textContent=0;
+ coinsEl.textContent=0;
+ overlay.classList.add("hidden");
+}
+
+function rect(x,y,w,h,color){
+ ctx.fillStyle=color;
+ ctx.shadowColor=color;
+ ctx.shadowBlur=15;
+ ctx.fillRect(x,y,w,h);
+ ctx.shadowBlur=0;
+}
+
+function drawRoad(){
+ ctx.fillStyle="#0b1025";
+ ctx.fillRect(0,0,420,620);
+
+ ctx.strokeStyle="#192b50";
+ ctx.lineWidth=2;
+
+ for(let x=105;x<420;x+=105){
+  ctx.beginPath();
+  ctx.moveTo(x,0);ctx.lineTo(x,620);
+  ctx.stroke();
+ }
+
+ ctx.strokeStyle="#00bfff";
+ ctx.setLineDash([25,25]);
+ ctx.lineDashOffset=-frame*speed;
+ ctx.beginPath();
+ ctx.moveTo(210,0);ctx.lineTo(210,620);
+ ctx.stroke();
+ ctx.setLineDash([]);
+}
+
+function drawPlayer(){
+ ctx.save();
+ ctx.translate(player.x+20,player.y+24);
+
+ ctx.shadowColor="#00eaff";
+ ctx.shadowBlur=22;
+ ctx.fillStyle="#00eaff";
+ ctx.beginPath();
+ ctx.moveTo(0,-25);
+ ctx.lineTo(19,22);
+ ctx.lineTo(0,12);
+ ctx.lineTo(-19,22);
+ ctx.closePath();
+ ctx.fill();
+
+ ctx.fillStyle="white";
+ ctx.fillRect(-4,-5,8,15);
+ ctx.restore();
+}
+
+function spawn(){
+ const lane=Math.floor(Math.random()*4);
+ obstacles.push({
+  x:lane*105+28,y:-50,w:48,h:45
+ });
+
+ if(Math.random()<0.75){
+  const coinLane=Math.floor(Math.random()*4);
+  coins.push({
+   x:coinLane*105+52,y:-120,r:10
+  });
+ }
+}
+
+function drawObjects(){
+ obstacles.forEach(o=>{
+  rect(o.x,o.y,o.w,o.h,"#ff276d");
+  ctx.fillStyle="#ffb0cf";
+  ctx.fillRect(o.x+8,o.y+8,o.w-16,5);
+ });
+
+ coins.forEach(c=>{
+  ctx.beginPath();
+  ctx.arc(c.x,c.y,c.r,0,Math.PI*2);
+  ctx.fillStyle="#ffd43b";
+  ctx.shadowColor="#ffd43b";
+  ctx.shadowBlur=18;
+  ctx.fill();
+  ctx.shadowBlur=0;
+ });
+}
+
+function collision(a,b){
+ return a.x<b.x+b.w &&
+ a.x+a.w>b.x &&
+ a.y<b.y+b.h &&
+ a.y+a.h>b.y;
+}
+
+function endGame(){
+ running=false;gameOver=true;
+ if(score>best){
+  best=score;
+  localStorage.setItem("neonBest",best);
+ }
+ bestEl.textContent=best;
+ document.getElementById("title").textContent="GAME OVER!";
+ document.getElementById("message").innerHTML=
+ `Skor kamu: <b>${score}</b><br>
+ Koin terkumpul: <b>${totalCoins}</b><br>
+ Rekor terbaik: <b>${best}</b>`;
+ document.getElementById("start").textContent="MAIN LAGI";
+ overlay.classList.remove("hidden");
+}
+
+function update(){
+ if(!running||paused)return;
+
+ frame++;
+ speed=3+Math.min(score/500,6);
+
+ if(left)player.x-=5;
+ if(right)player.x+=5;
+
+ player.x=Math.max(5,Math.min(375,player.x));
+
+ if(frame%Math.max(25,65-Math.floor(speed*3))===0)
+  spawn();
+
+ obstacles.forEach(o=>o.y+=speed);
+ coins.forEach(c=>c.y+=speed);
+
+ for(let o of obstacles){
+  if(collision(player,o)){
+   endGame();return;
+  }
+ }
+
+ coins=coins.filter(c=>{
+  const dx=player.x+20-c.x;
+  const dy=player.y+24-c.y;
+  if(Math.sqrt(dx*dx+dy*dy)<30){
+   totalCoins++;
+   coinsEl.textContent=totalCoins;
+   return false;
+  }
+  return c.y<650;
+ });
+
+ obstacles=obstacles.filter(o=>o.y<650);
+
+ if(frame%6===0){
+  score++;
+  scoreEl.textContent=score;
+ }
+}
+
+function draw(){
+ drawRoad();
+ drawObjects();
+ drawPlayer();
+
+ if(paused&&running){
+  ctx.fillStyle="#ffffff";
+  ctx.font="bold 38px Arial";
+  ctx.textAlign="center";
+  ctx.fillText("PAUSED",210,300);
+ }
+}
+
+function loop(){
+ update();
+ draw();
+ requestAnimationFrame(loop);
+}
+
+function togglePause(){
+ if(!running)return;
+ paused=!paused;
+ document.getElementById("pause").textContent=
+ paused?"▶ LANJUT":"Ⅱ PAUSE";
+}
+
+document.getElementById("start").onclick=()=>{
+ reset();
+ document.getElementById("start").textContent="MULAI GAME";
+};
+
+document.getElementById("pause").onclick=togglePause;
+
+function control(button,direction){
+ button.addEventListener("pointerdown",e=>{
+  e.preventDefault();
+  if(direction==="left")left=true;
+  else right=true;
+ });
+ ["pointerup","pointerleave","pointercancel"].forEach(event=>{
+  button.addEventListener(event,()=>{
+   if(direction==="left")left=false;
+   else right=false;
+  });
+ });
+}
+
+control(document.getElementById("left"),"left");
+control(document.getElementById("right"),"right");
+
+document.addEventListener("keydown",e=>{
+ if(e.key==="ArrowLeft"||e.key.toLowerCase()==="a")left=true;
+ if(e.key==="ArrowRight"||e.key.toLowerCase()==="d")right=true;
+ if(e.key==="Escape")togglePause();
+});
+
+document.addEventListener("keyup",e=>{
+ if(e.key==="ArrowLeft"||e.key.toLowerCase()==="a")left=false;
+ if(e.key==="ArrowRight"||e.key.toLowerCase()==="d")right=false;
+});
+
+loop();
+</script>
+</body>
+</html>
